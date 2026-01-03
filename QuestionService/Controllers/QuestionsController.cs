@@ -1,28 +1,27 @@
 using System.Security.Claims;
+using Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using QuestionService.Data;
 using QuestionService.DTOs;
 using QuestionService.Models;
+using QuestionService.Services;
+using Wolverine;
 
 namespace QuestionService.Controllers;
 
 [ApiController]
 [Route("[controller]")]
-public class QuestionsController(QuestionDbContext dbContext):ControllerBase
+public class QuestionsController(QuestionDbContext dbContext,IMessageBus bus,TagService tagService):ControllerBase
 {
     [Authorize]
     [HttpPost]
     public async Task<ActionResult<Question>> CreateQuestionsAsync(CreateQuestionDto dto)
     {
-        var validTags = await dbContext.Tags.Where(x=>dto.Tags.Contains(x.Slug)).ToListAsync();
-        
-        var missingTags = dto.Tags.Except(validTags.Select(x=>x.Slug)).ToList();
-
-        if (missingTags.Count > 0)
+        if (!await tagService.AreTagsValidAsync(dto.Tags))
         {
-            return BadRequest($"Invalid tags: {string.Join(",", missingTags)}");
+            return BadRequest($"Invalid tags.");
         }
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         var name = User.FindFirstValue("name");
@@ -43,6 +42,9 @@ public class QuestionsController(QuestionDbContext dbContext):ControllerBase
         
         dbContext.Questions.Add(question);
         await dbContext.SaveChangesAsync();
+        
+        await bus.PublishAsync(new QuestionCreated(question.Id, question.Title, question.Content,
+            question.CreatedAt, question.TagSlugs));
         
         return Created($"/questions/{question.Id}",question);
     }
@@ -92,11 +94,9 @@ public class QuestionsController(QuestionDbContext dbContext):ControllerBase
             return Forbid();
         }
         
-        var validTags = await dbContext.Tags.Where(x=>dto.Tags.Contains(x.Slug)).ToListAsync();
-        var missingTags = dto.Tags.Except(validTags.Select(x=>x.Slug)).ToList();
-        if (missingTags.Count > 0)
+        if (!await tagService.AreTagsValidAsync(dto.Tags))
         {
-            return BadRequest($"Invalid tags: {string.Join(",", missingTags)}");
+            return BadRequest($"Invalid tags.");
         }
 
         question.Title = dto.Title;
@@ -105,6 +105,9 @@ public class QuestionsController(QuestionDbContext dbContext):ControllerBase
         question.UpdatedAt = DateTime.UtcNow;
         
         await dbContext.SaveChangesAsync();
+        
+        await bus.PublishAsync(new QuestionUpdated(question.Id, question.Title, question.Content,
+             question.TagSlugs.ToArray()));
         
         return NoContent();
     }
@@ -128,6 +131,8 @@ public class QuestionsController(QuestionDbContext dbContext):ControllerBase
         dbContext.Questions.Remove(question);
         await dbContext.SaveChangesAsync();
         
+        await bus.PublishAsync(new QuestionDeleted(question.Id));
+
         return NoContent();
     }
 }

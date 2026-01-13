@@ -22,4 +22,8 @@
       <ProjectReference Include="..\Overflow.ServiceDefaults\Overflow.ServiceDefaults.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="RequestHelpers\" />
+    </ItemGroup>
+
 </Project>
